@@ -815,12 +815,7 @@ def extract_all_orders_improved(page, max_orders=None, start_from_row=1, delay_b
             except Exception as e:
                 print(f"✗ Error processing row {row_index}: {e}")
                 continue
-            
-            # # Add delay between orders to avoid overwhelming the server
-            # if row_index < total_rows:  # Don't delay after last row
-            #     print(f"  Waiting {delay_between_orders}s before next order...")
-            #     page.wait_for_timeout(delay_between_orders * 1000)
-        
+
         # Try to navigate to next page
         print(f"\nAttempting to navigate to next page...")
         if navigate_to_next_page(page):
