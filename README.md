@@ -12,7 +12,7 @@ cd dabao-sg
 chmod +x ./install-uv-playwright.sh
 ./install-uv-playwright.sh
 ```
-3. Create virtual environment `dabaosg-venv` and install packages.
+3. Create and activate virtual environment `dabaosg-venv` and install packages.
 ```bash
 uv venv dabaosg-venv
 source dabaosg-venv/bin/activate
