@@ -31,13 +31,15 @@ PW = os.getenv(f"{CATERING_SERVICE_PROVIDER}_PW")
 SITE = os.getenv(f"{CATERING_SERVICE_PROVIDER}_SITE")
 LOGIN_URL = os.getenv(f"{CATERING_SERVICE_PROVIDER}_LOGIN_URL")
 CALENDAR_ID = os.getenv("CALENDAR_ID")
-TIMEZONE = os.getenv("TIMEZONE", "America/Los_Angeles")
+CALENDAR_TIMEZONE = os.getenv("CALENDAR_TIMEZONE", "America/Los_Angeles")
 SCOPES = ["https://www.googleapis.com/auth/calendar"]  # keep scopes in code
 
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 EXPORT_MENU_ITEM_TEXT = "Export all data to XLS"
 CITY_STATE_ZIP = re.compile(r',\s*[A-Z]{2}\s+\d{5}(-\d{4})?$')
+CALENDAR_WINDOW_DAYS = int(os.getenv("CALENDAR_WINDOW_DAYS"))
+CALENDAR_EVENT_DURATION = int(os.getenv("CALENDAR_EVENT_DURATION", "60"))
 
 def login(page, LOGINID, PW):
      # Fill in email and password
@@ -880,8 +882,8 @@ def _build_description(order: dict, identifier: str) -> str:
     return "\n".join(lines)
 
 def _build_calendar_event_body(order: dict, platform: str,
-                               tz_name=TIMEZONE,
-                               default_duration_minutes=60) -> dict | None:
+                               tz_name=CALENDAR_TIMEZONE,
+                               default_duration_minutes=CALENDAR_EVENT_DURATION) -> dict | None:
     identifier = _build_identifier(order, platform)
     start_iso = order.get("delivery_iso")
     if not identifier or not start_iso:
@@ -890,7 +892,7 @@ def _build_calendar_event_body(order: dict, platform: str,
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
-        tz = ZoneInfo(TIMEZONE)
+        tz = ZoneInfo(CALENDAR_TIMEZONE)
 
     try:
         start_dt = datetime.fromisoformat(start_iso)
@@ -928,9 +930,9 @@ def _index_events_by_identifier(events: list[dict]) -> dict[str, dict]:
     return idx
 
 def upsert_events(calendar_client, calendar_id: str, orders: list[dict],
-                  platform: str, tz_name=TIMEZONE,
-                  default_duration_minutes=60,
-                  days_before=365, days_after=365) -> list[dict]:
+                  platform: str, tz_name=CALENDAR_TIMEZONE,
+                  default_duration_minutes=CALENDAR_EVENT_DURATION,
+                  days_before=CALENDAR_WINDOW_DAYS, days_after=CALENDAR_WINDOW_DAYS) -> list[dict]:
     """
     Upsert by identifier '<platform>-<orderid>' in extendedProperties.private.order_key.
     Title: '<platform> - <customer_name> - <pax> pax - <total>'.
@@ -1007,10 +1009,10 @@ def main(headless: bool, preview_rows: int, out_dir: Path):
         calendar_id=CALENDAR_ID,
         orders=all_orders,
         platform=CATERING_SERVICE_PROVIDER,
-        tz_name=TIMEZONE,
-        default_duration_minutes=60,
-        days_before=365,
-        days_after=365,
+        tz_name=CALENDAR_TIMEZONE,
+        default_duration_minutes=CALENDAR_EVENT_DURATION,
+        days_before=CALENDAR_WINDOW_DAYS,
+        days_after=CALENDAR_WINDOW_DAYS,
     )
     print(f"Upserted {len(changes)} events.")
 
