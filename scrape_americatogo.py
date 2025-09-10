@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 import os
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from urllib.parse import urljoin
 import argparse
@@ -11,6 +11,9 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 from pathlib import Path
 import re
+from gcalclient import GoogleCalendarClient
+from zoneinfo import ZoneInfo, available_timezones
+from html import unescape
 
 # setup logging
 logging.basicConfig(
@@ -22,17 +25,19 @@ logger = logging.getLogger(__name__)
 
 # get some env vars.
 load_dotenv()
-CATERING_SERVICE_PROVIDER = "AMERICATOGO"
+CATERING_SERVICE_PROVIDER = "ATG"
 LOGINID = os.getenv(f"{CATERING_SERVICE_PROVIDER}_LOGINID")
 PW = os.getenv(f"{CATERING_SERVICE_PROVIDER}_PW")
 SITE = os.getenv(f"{CATERING_SERVICE_PROVIDER}_SITE")
 LOGIN_URL = os.getenv(f"{CATERING_SERVICE_PROVIDER}_LOGIN_URL")
+CALENDAR_ID = os.getenv("CALENDAR_ID")
+TIMEZONE = os.getenv("TIMEZONE", "America/Los_Angeles")
 SCOPES = ["https://www.googleapis.com/auth/calendar"]  # keep scopes in code
 
 DOWNLOADS_DIR = Path("downloads")
 DOWNLOADS_DIR.mkdir(exist_ok=True)
 EXPORT_MENU_ITEM_TEXT = "Export all data to XLS"
-
+CITY_STATE_ZIP = re.compile(r',\s*[A-Z]{2}\s+\d{5}(-\d{4})?$')
 
 def login(page, LOGINID, PW):
      # Fill in email and password
@@ -62,77 +67,6 @@ def go_to_view_orders(page):
     page.wait_for_url(re.compile(r".*/VendorPortal/Orders.*"))
     logger.info(f"At Orders page: {page.url}")
     page.wait_for_load_state("networkidle")
-
-
-def _find_export_root(page):
-    """
-    Return (root, is_frame) where root is a Locator *context* (page or frame)
-    that contains the Export dropdown. Tries main page first, then iframes.
-    """
-    sel = ".dx-datagrid-export-button.dx-dropdownbutton[title='Export']"
-    # main page?
-    if page.locator(sel).first.count():
-        return page, False
-    # try iframes
-    for fr in page.frames:
-        try:
-            if fr.locator(sel).first.count():
-                return fr, True
-        except Exception:
-            continue
-    raise AssertionError("Export dropdown not found on page or any iframe")
-
-def open_export_menu(page):
-    """
-    Clicks the Export dropdown and waits for its popup (no aria-owns required).
-    Works whether the grid is on the main page or inside an iframe.
-    """
-    root, _ = _find_export_root(page)
-
-    # Make sure toolbar is rendered & in view
-    root.locator(".dx-toolbar-items-container").first.wait_for(state="visible", timeout=15000)
-    container = root.locator(".dx-datagrid-export-button.dx-dropdownbutton[title='Export']").first
-    expect(container).to_be_visible(timeout=10000)
-
-    btn = container.locator(".dx-dropdownbutton-action[role='button']").first
-    expect(btn).to_be_visible(timeout=10000)
-
-    if btn.get_attribute("aria-expanded") != "true":
-        btn.click()
-
-    # Wait for the DevExtreme overlay popup that contains the list items
-    root.locator(".dx-dropdownbutton-content .dx-list-items").first.wait_for(state="visible", timeout=10000)
-
-def export_all_to_xls(page, save_dir: Path) -> tuple[pd.DataFrame, Path]:
-    save_dir.mkdir(parents=True, exist_ok=True)
-    root, _ = _find_export_root(page)
-
-    item = root.get_by_role("option", name=EXPORT_MENU_ITEM_TEXT).first
-    expect(item).to_be_visible(timeout=10000)
-
-    with page.expect_download() as dl_info:
-        try:
-            item.click()
-        except Exception:
-            item.click(force=True)
-
-    download = dl_info.value
-    suggested = download.suggested_filename or "orders.xls"
-    out_path = save_dir / suggested
-    download.save_as(str(out_path))
-    logger.info(f"Saved export to: {out_path}")
-
-    ext = out_path.suffix.lower()
-    if ext == ".xlsx":
-        df = pd.read_excel(out_path, engine="openpyxl")
-    elif ext == ".xls":
-        df = pd.read_excel(out_path, engine="xlrd")  # xlrd<2.0 required
-    elif ext == ".csv":
-        df = pd.read_csv(out_path)
-    else:
-        raise ValueError(f"Unsupported export format: {ext}")
-
-    return df, out_path
 
 def clean_text(text):
     if not text:
@@ -190,6 +124,7 @@ def extract_order_details(page):
             # Get the HTML content to better handle line breaks
             try:
                 delivery_html = delivery_section.inner_html()
+                order_details['address'] = _extract_address_from_delivery_html(delivery_html)
                 # Replace HTML line breaks with spaces
                 delivery_html = re.sub(r'<br\s*/?>', ' ', delivery_html)
                 # Remove HTML tags and get text
@@ -201,7 +136,36 @@ def extract_order_details(page):
                 # Fallback to regular text content
                 delivery_text = delivery_section.text_content()
                 order_details['delivery_info'] = clean_text(delivery_text)
-        
+            
+            # Try to extract a customer name (e.g., "George Wang") from the HTML first
+            cust_name = None
+            try:
+                m = re.search(
+                    r'Deliver to.*?<span[^>]*class="[^"]*\bimportant\b[^"]*"[^>]*>\s*(.*?)\s*</span>',
+                    delivery_html,
+                    flags=re.IGNORECASE | re.DOTALL
+                )
+                if m:
+                    cust_name = clean_text(m.group(1))
+            except:
+                pass
+
+            # Fallback: first line/chunk of delivery_info
+            if not cust_name:
+                di = order_details.get('delivery_info') or ''
+                # take first chunk before comma/pipe/newline
+                for sep in [",", "|", "\n"]:
+                    if sep in di:
+                        cust_name = clean_text(di.split(sep)[0])
+                        break
+                if not cust_name:
+                    cust_name = clean_text(di)
+
+            # Keep it reasonable
+            order_details['customer_name'] = (cust_name or 'Customer')[:80]
+            
+            print(f"ADDRESS: {order_details['address']}")
+
         # Extract delivery time (handle <br>, parse to fields)
         delivery_time_section = order_table.locator('text=Deliver at').locator('..').first
         if delivery_time_section.count() > 0:
@@ -375,7 +339,6 @@ def get_current_page_info(page):
     total_pages = max(labels) if labels else None
     return current_page, total_pages
 
-
 def navigate_to_next_page(page):
     """
     Clicks the next numeric page button.
@@ -490,6 +453,9 @@ def save_orders_to_file(orders, output_dir: Path, format='json'):
                     'ATG_Order_ID': order.get('atg_order_id', ''),
                     'PO_ID': order.get('po_id', ''),
                     'Vendor': order.get('vendor_name', ''),
+                    'Customer_Name': order.get('customer_name', ''),
+                    'Delivery_Info': order.get('delivery_info', ''),
+                    'Delivery_Instructions': order.get('delivery_instructions', ''),
                     'Delivery_Time_Raw': order.get('delivery_time', ''),   # original text
                     'Delivery_Date': order.get('delivery_date', ''),       # YYYY-MM-DD
                     'Delivery_Time_24h': order.get('delivery_time_24h', ''),  # HH:MM
@@ -746,7 +712,7 @@ def close_popup_robust(page, max_attempts: int = 3):
                     page.keyboard.press('Escape')
                     page.wait_for_timeout(500)
 
-def extract_all_orders_improved(page, max_orders=None, start_from_row=1, delay_between_orders=2):
+def extract_all_orders_improved(page, max_orders=None, start_from_row=1):
     """
     Improved version with better error handling and delays
     """
@@ -831,6 +797,173 @@ def extract_all_orders_improved(page, max_orders=None, start_from_row=1, delay_b
     print(f"Total orders extracted: {len(all_orders)}")
     return all_orders
 
+def _extract_address_from_delivery_html(delivery_html: str) -> str | None:
+    """Return a multi-line postal address from the 'Deliver to' HTML block.
+
+    Heuristics:
+    - Keep line breaks, strip all other tags, unescape HTML.
+    - Drop lines that look like emails or phone numbers.
+    - Start at the first line that begins with a street number; if not found,
+      start at the line after a campus/building keyword.
+    - Collect lines up to (and including) the first 'City, ST ZIP' line.
+    """
+    # Preserve line breaks, strip tags, unescape
+    txt = re.sub(r'<br\s*/?>', '\n', delivery_html, flags=re.I)
+    txt = re.sub(r'<[^>]+>', '', txt)
+    txt = unescape(txt)
+
+    # Normalize lines and remove empties
+    lines = [l.strip() for l in txt.split('\n') if l.strip()]
+
+    # Filter out emails & phone numbers
+    phone_re = re.compile(r'\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}')
+    filtered = [l for l in lines if '@' not in l and not phone_re.search(l)]
+
+    # Find start of address: prefer street-number line
+    start = next((i for i, l in enumerate(filtered) if re.match(r'^\d{1,6}\s', l)), None)
+    if start is None:
+        # Fallback: after a campus/building-like line (e.g., "UC San Francisco")
+        kw_idx = next(
+            (i for i, l in enumerate(filtered)
+             if re.search(r'\b(UC|UCSF|University|Campus|Building|Center)\b', l, re.I)),
+            None
+        )
+        if kw_idx is not None and kw_idx + 1 < len(filtered):
+            start = kw_idx + 1
+
+    if start is None:
+        return None
+
+    # Collect through the first "City, ST ZIP" line
+    addr_lines = []
+    for l in filtered[start:]:
+        addr_lines.append(l)
+        if CITY_STATE_ZIP.search(l):
+            break
+
+    # Tidy and return (keep multi-line; you can join with ', ' later if you want 1 line)
+    out = "\n".join(addr_lines).strip(' ,')
+    out = re.sub(r'\s*,\s*,', ', ', out)  # collapse any accidental double commas
+    return out or None
+
+def _build_identifier(order: dict, platform: str) -> str | None:
+    oid = order.get("atg_order_id")
+    return f"{platform}-{oid}" if platform and oid else None
+
+def _build_description(order: dict, identifier: str) -> str:
+    lines = []
+    p = lines.append
+    p(f"<b>Identifier:</b> {identifier}")
+    # p(f"Vendor: {order.get('vendor_name', 'N/A')}")
+    # p(f"ATG Order ID: {order.get('atg_order_id', 'N/A')}")
+    p(f"<b>PO ID:</b> {order.get('po_id', 'N/A')}")
+    # p(f"Delivery (raw): {order.get('delivery_time', 'N/A')}")
+    # p(f"Delivery ISO: {order.get('delivery_iso', 'N/A')}")
+    # p(f"Delivery info: {order.get('delivery_info', 'N/A')}")
+    p("========================================")
+    p(f"<b>Delivery Instructions:</b> \n{order.get('delivery_instructions', 'N/A')}")
+    # p(f"People: {order.get('number_of_people', 'N/A')}")
+    p("========================================")
+    items = order.get("items") or []
+    if items:
+        p("<b>Items:</b>")
+        for it in items:
+            p(f"  - {it.get('quantity','')} x {it.get('description','')} — {it.get('price','')}")
+    p("========================================")
+    pricing = order.get("pricing") or {}
+    if pricing:
+        p("<b>Pricing:</b>")
+        for k, v in pricing.items():
+            p(f"  - {k}: {v}")
+    # p(f"Created: {order.get('created_date', 'N/A')}")
+    # p(f"Page: {order.get('_page_number', 'N/A')}  Row: {order.get('_row_number', 'N/A')}  Seq: {order.get('_order_sequence', 'N/A')}")
+    return "\n".join(lines)
+
+def _build_calendar_event_body(order: dict, platform: str,
+                               tz_name=TIMEZONE,
+                               default_duration_minutes=60) -> dict | None:
+    identifier = _build_identifier(order, platform)
+    start_iso = order.get("delivery_iso")
+    if not identifier or not start_iso:
+        return None
+
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo(TIMEZONE)
+
+    try:
+        start_dt = datetime.fromisoformat(start_iso)
+    except Exception as e:
+        return None
+    if start_dt.tzinfo is None:
+        start_dt = start_dt.replace(tzinfo=tz)
+    end_dt = start_dt + timedelta(minutes=default_duration_minutes)
+
+    customer = (order.get("customer_name") or "Customer").strip()
+    pax = (order.get("number_of_people") or "").strip()
+    total = (order.get("pricing", {}).get("total", "") or "").strip()
+    if total and not total.startswith("$"):
+        total = f"${total}"
+
+    # Title: "<identifier> - <customer> - <pax> pax - <total>"
+    title = f"{identifier} - {customer} - {pax} pax - {total}"
+
+    return {
+        "summary": title,
+        "location": order.get("address") or order.get("delivery_info") or "",
+        "description": _build_description(order, identifier),
+        "start": {"dateTime": start_dt.isoformat(), "timeZone": tz.key},
+        "end":   {"dateTime": end_dt.isoformat(),   "timeZone": tz.key},
+        "extendedProperties": {"private": {"order_key": identifier}},
+    }
+
+def _index_events_by_identifier(events: list[dict]) -> dict[str, dict]:
+    idx = {}
+    for ev in events:
+        ext = ev.get("extendedProperties", {}).get("private", {})
+        key = ext.get("order_key")
+        if key:
+            idx[str(key)] = ev
+    return idx
+
+def upsert_events(calendar_client, calendar_id: str, orders: list[dict],
+                  platform: str, tz_name=TIMEZONE,
+                  default_duration_minutes=60,
+                  days_before=365, days_after=365) -> list[dict]:
+    """
+    Upsert by identifier '<platform>-<orderid>' in extendedProperties.private.order_key.
+    Title: '<platform> - <customer_name> - <pax> pax - <total>'.
+    """
+    svc = calendar_client.service
+    existing = calendar_client.get_all_events_in_range(
+        calendar_id=calendar_id,
+        days_before=days_before,
+        days_after=days_after,
+        tz_name=tz_name,
+    )
+    by_key = _index_events_by_identifier(existing)
+    changed = []
+    for order in orders:
+        body = _build_calendar_event_body(order, platform=platform,
+                                          tz_name=tz_name,
+                                          default_duration_minutes=default_duration_minutes)
+        if not body:
+            continue
+        key = body["extendedProperties"]["private"]["order_key"]
+        if not by_key or key not in by_key:
+            created = svc.events().insert(calendarId=calendar_id, body=body).execute()
+            print(f"Created: {key} → {created.get('htmlLink')}")
+            changed.append(created)
+        else:
+            ev_id = by_key[key]["id"]
+            updated = svc.events().update(calendarId=calendar_id, eventId=ev_id, body=body).execute()
+            print(f"Updated: {key} → {updated.get('htmlLink')}")
+            changed.append(updated)
+            
+    return changed
+
+
 # Updated main function
 def main(headless: bool, preview_rows: int, out_dir: Path):
     with sync_playwright() as playwright:
@@ -844,14 +977,12 @@ def main(headless: bool, preview_rows: int, out_dir: Path):
 
         # Wait for page to load
         page.wait_for_load_state("networkidle")
-        time.sleep(5)  # Longer initial wait
 
         # Extract all orders with improved function
         all_orders = extract_all_orders_improved(
-            page, 
-            max_orders=5,  # Start with smaller number for testing
+            page,
+            max_orders=5, 
             start_from_row=1,
-            delay_between_orders=3  # Increase delay between orders
         )
         
         # Save to file
@@ -866,6 +997,22 @@ def main(headless: bool, preview_rows: int, out_dir: Path):
             print("No orders were extracted")
 
         browser.close()
+
+    # get all events from google calendar.
+    calendar_client = GoogleCalendarClient()
+    # events = calendar_client.get_all_events_in_range(calendar_id="c_bbf75f8c0a712d05f71d2a30f3f7304b0b25505965589338688f615ed83b1d30@group.calendar.google.com")
+    # print(events)
+    changes = upsert_events(
+        calendar_client=calendar_client,
+        calendar_id=CALENDAR_ID,
+        orders=all_orders,
+        platform=CATERING_SERVICE_PROVIDER,
+        tz_name=TIMEZONE,
+        default_duration_minutes=60,
+        days_before=365,
+        days_after=365,
+    )
+    print(f"Upserted {len(changes)} events.")
 
 if __name__=="__main__":
     parser = argparse.ArgumentParser()
