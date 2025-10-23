@@ -22,3 +22,8 @@ uv pip install -r requirements.txt
 ```python
 python scrape_americatogo.py
 ```
+5. Start the frontend.
+NOTE: This was bootstrapped with Next.js using `pnpm create next-app@latest client`
+```python
+pnpm dev
+```
