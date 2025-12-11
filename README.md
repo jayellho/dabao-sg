@@ -27,3 +27,26 @@ NOTE: This was bootstrapped with Next.js using `pnpm create next-app@latest clie
 ```python
 pnpm dev
 ```
+
+### EZCater
+> **_NOTE:_** My understanding is that EZCater allows subscriptions to some events. It will emit events (e.g. new orders) to a subscribed webhook URL that is maintained by us.
+
+1. Run the webhook server.
+```python
+python simple_ezcater_webhook.py
+```
+
+2. [Testing] Edit the URL as needed then run this in a terminal to send a fake event to your webhook URL. Check Google calendar for the event.
+```
+curl -X POST http://127.0.0.1:5000/webhook/ezcater   -H "Content-Type: application/json"   -d '{
+    "entity_type": "Order",
+    "entity_id": "11111111-2222-3333-4444-555555555555",
+    "key": "submitted",
+    "occurred_at": "2025-12-11T18:00:00Z",
+    "created_at": "2025-12-11T18:00:01Z"
+  }'
+
+3. Check health.
+```
+curl http://127.0.0.1:5000/health
+```
