@@ -86,3 +86,58 @@ class GoogleCalendarClient:
             if not page_token:
                 break
         return events
+
+
+    def upsert_events(
+        self,
+        calendar_id: str,
+        orders: list[dict],
+        body_builder,  # callable: order -> event body dict (or None to skip)
+        days_before: int = 365,
+        days_after: int = 365,
+        tz_name: str = "America/Los_Angeles",
+    ) -> list[dict]:
+        """
+        Upsert events based on a stable key in extendedProperties.private.order_key.
+        - `body_builder(order)` must return a full Google Calendar event body dict
+          including `extendedProperties.private.order_key`. Return None to skip.
+        """
+        # Fetch existing events in the window
+        existing = self.get_all_events_in_range(
+            calendar_id=calendar_id,
+            days_before=days_before,
+            days_after=days_after,
+            tz_name=tz_name,
+        )
+
+        # Index by our stable key
+        by_key: dict[str, dict] = {}
+        for ev in existing:
+            ext = ev.get("extendedProperties", {}).get("private", {})
+            k = ext.get("order_key")
+            if k:
+                by_key[str(k)] = ev
+
+        # Upsert loop
+        changed: list[dict] = []
+        for order in orders:
+            body = body_builder(order)
+            if not body:
+                continue
+
+            key = body.get("extendedProperties", {}).get("private", {}).get("order_key")
+            if not key:
+                # Safe-guard: body_builder must provide the key
+                continue
+
+            if key not in by_key:
+                created = self.service.events().insert(calendarId=calendar_id, body=body).execute()
+                print(f"Created: {key} → {created.get('htmlLink')}")
+                changed.append(created)
+            else:
+                ev_id = by_key[key]["id"]
+                updated = self.service.events().update(calendarId=calendar_id, eventId=ev_id, body=body).execute()
+                print(f"Updated: {key} → {updated.get('htmlLink')}")
+                changed.append(updated)
+
+        return changed
