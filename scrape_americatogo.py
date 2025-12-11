@@ -769,7 +769,7 @@ def main():
     """Main function"""
     parser = argparse.ArgumentParser(description="Scrape AmericaToGo orders")
     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
-    parser.add_argument("--max-orders", type=int, default=5, help="Maximum number of orders to extract")
+    parser.add_argument("--max-orders", type=int, default=500, help="Maximum number of orders to extract")
     parser.add_argument("--out-dir", type=Path, default=DOWNLOADS_DIR, help="Output directory")
     parser.add_argument("--no-calendar", action="store_true", help="Skip Google Calendar sync")
     
