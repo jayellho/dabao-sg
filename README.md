@@ -32,6 +32,10 @@ pnpm dev
 
 ### EZCater
 > **_NOTE:_** My understanding is that EZCater allows subscriptions to some events. It will emit events (e.g. new orders) to a subscribed webhook URL that is maintained by us.
+0. [One-Time] Set-up a subscription to the events emitted by the EZCater GraphQL endpoint.
+```python
+python setup_ez_cater_webhooks.py
+```
 
 1. Run the webhook server.
 ```python
@@ -39,7 +43,7 @@ python simple_ezcater_webhook.py
 ```
 
 2. [Testing] Edit the URL as needed then run this in a terminal to send a fake event to your webhook URL. Check Google calendar for the event.
-```
+```bash
 curl -X POST http://127.0.0.1:5000/webhook/ezcater   -H "Content-Type: application/json"   -d '{
     "entity_type": "Order",
     "entity_id": "11111111-2222-3333-4444-555555555555",
@@ -47,8 +51,9 @@ curl -X POST http://127.0.0.1:5000/webhook/ezcater   -H "Content-Type: applicati
     "occurred_at": "2025-12-11T18:00:00Z",
     "created_at": "2025-12-11T18:00:01Z"
   }'
+```
 
 3. Check health.
-```
+```bash
 curl http://127.0.0.1:5000/health
 ```
