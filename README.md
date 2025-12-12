@@ -32,9 +32,9 @@ pnpm dev
 
 ### EZCater
 > **_NOTE:_** My understanding is that EZCater allows subscriptions to some events. It will emit events (e.g. new orders) to a subscribed webhook URL that is maintained by us.
-0. [One-Time] Set-up a subscription to the events emitted by the EZCater GraphQL endpoint.
+0. [One-Time] Set-up a subscription for your webhook URL to the events emitted by the EZCater GraphQL endpoint.
 ```python
-python setup_ezcater_webhooks.py https://your-domain.com/webhook/ezcater
+python setup_ezcater_webhooks.py https://your-webhook-url.com/webhook/ezcater
 ```
 
 1. Run the webhook server.
