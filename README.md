@@ -7,6 +7,8 @@ This repository contains code used to automate workflows for Dabao Singapore.
 git clone https://github.com/jayellho/dabao-sg.git
 cd dabao-sg
 ```
+> **_NOTE:_** You would have to copy in the following credential files as provided to you as these are not pushed into GitHub: `.env`, `credentials.json` and `token.json`.
+
 2. Install `uv` and `playwright`.
 ```bash
 chmod +x ./install-uv-playwright.sh
