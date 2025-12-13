@@ -1,3 +1,4 @@
+'use client';
 import Image from "next/image";
 import { Button, Flex } from 'antd';
 import { triggerAtgScrape } from "../endpoints"
