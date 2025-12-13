@@ -32,14 +32,13 @@ pnpm dev
 
 ### EZCater
 > **_NOTE:_** My understanding is that EZCater allows subscriptions to some events. It will emit events (e.g. new orders) to a subscribed webhook URL that is maintained by us.
-0. [One-Time] Set-up a subscription for your webhook URL to the events emitted by the EZCater GraphQL endpoint.
+0. [One-Time] Set-up a subscription for your webhook URL to the events emitted by the EZCater GraphQL endpoint. This is idempotent.
 ```python
 python setup_ezcater_webhooks.py https://your-webhook-url/webhook/ezcater
 ```
-
-1. Run the webhook server.
+1. Check if successfully subscribed.
 ```python
-python simple_ezcater_webhook.py
+python check_subscriptions.py
 ```
 
 2. [Testing] Edit the URL as needed then run this in a terminal to send a fake event to your webhook URL. Check Google calendar for the event.
@@ -61,7 +60,7 @@ curl http://127.0.0.1:5000/health
 ## AWS Notes
 > **_NOTE:_** The lightweight webhook server is currently hosted on an AWS EC2 instance.
 ### Connecting to the instance from a terminal
-1. Get the private key `dabao-sg.pem`and `cd` into the directory where the private key is saved.
+1. Get the private key `dabao-sg.pem` and `cd` into the directory where the private key is saved.
 2. Run the following commands to connect via SSH:
 ```curl
 chmod 400 dabao-sg.pem
@@ -78,4 +77,9 @@ screen -S dabao-sg
 ```curl
 screen -r dabao-sg
 ```
-2. Exit current active session with `Ctrl+A` then `D`. Always do this before exiting the SSH connection to keep the webhook server running.
+2. Assuming you already have the `dabao-sg` Git repository in the EC2 instance, just `cd` into it, activate the virtual environment and run the code.
+```python
+source dabaosg-venv/bin/activate
+python simple_ezcater_webhook.py
+```
+3. Exit current active session with `Ctrl+A` then `D`. Always do this before exiting the SSH connection to keep the webhook server running.
