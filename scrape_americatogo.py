@@ -24,6 +24,9 @@ from zoneinfo import ZoneInfo
 from core_types import Order, OrderItem
 from gcalclient import GoogleCalendarClient
 
+from dataclasses import dataclass
+from typing import Any
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -52,6 +55,15 @@ DOWNLOADS_DIR.mkdir(exist_ok=True)
 CITY_STATE_ZIP = re.compile(r',\s*[A-Z]{2}\s+\d{5}(-\d{4})?$')
 PHONE_RE = re.compile(r'\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}')
 
+@dataclass
+class ScrapeResult:
+    ok: bool
+    message: str
+    orders_count: int = 0
+    order_ids: list[str] | None = None
+    saved_json: str | None = None
+    saved_excel: str | None = None
+    calendar_changes: int | None = None
 
 class AmericaToGoScraper:
     """Main scraper class for AmericaToGo orders"""
@@ -638,7 +650,6 @@ class AmericaToGoScraper:
         logger.info(f"Extraction complete. Total orders: {len(all_orders)}")
         return all_orders
 
-
 def save_orders_to_file(orders, output_dir: Path, format='json'):
     """Save orders to file in specified format"""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -699,7 +710,6 @@ def save_orders_to_file(orders, output_dir: Path, format='json'):
     
     logger.info(f"Orders saved to: {filepath}")
     return filepath
-
 
 def build_calendar_event_body(order: Order, platform: str = "ATG",
                              tz_name: str = CALENDAR_TIMEZONE,
@@ -764,50 +774,100 @@ def build_calendar_event_body(order: Order, platform: str = "ATG",
         "extendedProperties": {"private": {"order_key": identifier}},
     }
 
+def scrape_atg_and_optionally_sync(
+    *,
+    headless: bool = True,
+    max_orders: int = 200,
+    out_dir: Path = DOWNLOADS_DIR,
+    sync_calendar: bool = True,
+) -> ScrapeResult:
+    """
+    Callable entrypoint for running ATG scrape from a web server endpoint.
+    Returns a small JSON-safe summary.
+    """
+    try:
+        with AmericaToGoScraper(headless=headless) as scraper:
+            scraper.login()
+            scraper.navigate_to_orders()
+            orders = scraper.extract_all_orders(max_orders=max_orders, start_from_row=1)
 
-def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description="Scrape AmericaToGo orders")
-    parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
-    parser.add_argument("--max-orders", type=int, default=500, help="Maximum number of orders to extract")
-    parser.add_argument("--out-dir", type=Path, default=DOWNLOADS_DIR, help="Output directory")
-    parser.add_argument("--no-calendar", action="store_true", help="Skip Google Calendar sync")
-    
-    args = parser.parse_args()
-    
-    # Extract orders
-    with AmericaToGoScraper(headless=args.headless) as scraper:
-        scraper.login()
-        scraper.navigate_to_orders()
-        
-        orders = scraper.extract_all_orders(
-            max_orders=args.max_orders,
-            start_from_row=1
+        if not orders:
+            return ScrapeResult(ok=True, message="No orders extracted", orders_count=0, order_ids=[])
+
+        # Save outputs (optional but useful for debugging)
+        saved_json = str(save_orders_to_file(orders, out_dir, format="json"))
+        saved_excel = str(save_orders_to_file(orders, out_dir, format="excel"))
+
+        calendar_changes = None
+        if sync_calendar and CALENDAR_ID:
+            calendar_client = GoogleCalendarClient()
+            changes = calendar_client.upsert_events(
+                calendar_id=CALENDAR_ID,
+                orders=orders,
+                body_builder=lambda o: build_calendar_event_body(o, "ATG"),
+                days_before=CALENDAR_WINDOW_DAYS,
+                days_after=CALENDAR_WINDOW_DAYS,
+                tz_name=CALENDAR_TIMEZONE,
+            )
+            calendar_changes = len(changes)
+
+        return ScrapeResult(
+            ok=True,
+            message="Scrape completed",
+            orders_count=len(orders),
+            order_ids=[o.atg_order_id for o in orders if o.atg_order_id],
+            saved_json=saved_json,
+            saved_excel=saved_excel,
+            calendar_changes=calendar_changes,
         )
+
+    except Exception as e:
+        logger.exception("ATG scrape failed")
+        return ScrapeResult(ok=False, message=str(e), orders_count=0, order_ids=[])
+
+# def main():
+#     """Main function"""
+#     parser = argparse.ArgumentParser(description="Scrape AmericaToGo orders")
+#     parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+#     parser.add_argument("--max-orders", type=int, default=500, help="Maximum number of orders to extract")
+#     parser.add_argument("--out-dir", type=Path, default=DOWNLOADS_DIR, help="Output directory")
+#     parser.add_argument("--no-calendar", action="store_true", help="Skip Google Calendar sync")
+    
+#     args = parser.parse_args()
+    
+#     # Extract orders
+#     with AmericaToGoScraper(headless=args.headless) as scraper:
+#         scraper.login()
+#         scraper.navigate_to_orders()
         
-        if orders:
-            # Save to files
-            save_orders_to_file(orders, args.out_dir, format='json')
-            save_orders_to_file(orders, args.out_dir, format='excel')
+#         orders = scraper.extract_all_orders(
+#             max_orders=args.max_orders,
+#             start_from_row=1
+#         )
+        
+#         if orders:
+#             # Save to files
+#             save_orders_to_file(orders, args.out_dir, format='json')
+#             save_orders_to_file(orders, args.out_dir, format='excel')
             
-            # Sync to Google Calendar
-            if not args.no_calendar and CALENDAR_ID:
-                logger.info("Syncing orders to Google Calendar...")
-                calendar_client = GoogleCalendarClient()
-                changes = calendar_client.upsert_events(
-                    calendar_id=CALENDAR_ID,
-                    orders=orders,
-                    body_builder=lambda order: build_calendar_event_body(order, "ATG"),
-                    days_before=CALENDAR_WINDOW_DAYS,
-                    days_after=CALENDAR_WINDOW_DAYS,
-                    tz_name=CALENDAR_TIMEZONE
-                )
-                logger.info(f"Upserted {len(changes)} calendar events")
+#             # Sync to Google Calendar
+#             if not args.no_calendar and CALENDAR_ID:
+#                 logger.info("Syncing orders to Google Calendar...")
+#                 calendar_client = GoogleCalendarClient()
+#                 changes = calendar_client.upsert_events(
+#                     calendar_id=CALENDAR_ID,
+#                     orders=orders,
+#                     body_builder=lambda order: build_calendar_event_body(order, "ATG"),
+#                     days_before=CALENDAR_WINDOW_DAYS,
+#                     days_after=CALENDAR_WINDOW_DAYS,
+#                     tz_name=CALENDAR_TIMEZONE
+#                 )
+#                 logger.info(f"Upserted {len(changes)} calendar events")
             
-            logger.info(f"Successfully processed {len(orders)} orders")
-        else:
-            logger.warning("No orders were extracted")
+#             logger.info(f"Successfully processed {len(orders)} orders")
+#         else:
+#             logger.warning("No orders were extracted")
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()

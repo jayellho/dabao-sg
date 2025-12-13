@@ -17,6 +17,7 @@ from datetime import timedelta
 # Import existing modules
 from core_types import Order, OrderItem
 from gcalclient import GoogleCalendarClient
+from scrape_americatogo import scrape_atg_and_optionally_sync
 
 # Load environment
 load_dotenv()
@@ -65,8 +66,6 @@ def create_order_from_webhook(notification):
         row_number=0,
         order_sequence=0
     )
-
-
 
 def build_ezcater_event_body(order: Order,
                              tz_name: str = "America/Los_Angeles",
@@ -146,7 +145,6 @@ def sync_to_calendar(order):
         print(f"Calendar sync failed: {e}")
         return False
 
-
 @app.route('/webhook/ezcater', methods=['POST'])
 def ezcater_webhook():
     """Handle EZCater webhook notifications"""
@@ -185,6 +183,36 @@ def health():
         "status": "healthy",
         "calendar_configured": calendar_client is not None
     })
+
+@app.route('/api/atg/scrape', methods=['POST'])
+def atg_scrape():
+    """
+    Trigger an ATG scrape.
+    Body (optional):
+      { "max_orders": 200, "headless": true, "sync_calendar": true }
+    """
+    payload = request.get_json(silent=True) or {}
+
+    max_orders = int(payload.get("max_orders", 200))
+    headless = bool(payload.get("headless", True))
+    sync_calendar = bool(payload.get("sync_calendar", True))
+
+    result = scrape_atg_and_optionally_sync(
+        headless=headless,
+        max_orders=max_orders,
+        sync_calendar=sync_calendar,
+    )
+
+    status = 200 if result.ok else 500
+    return jsonify({
+        "ok": result.ok,
+        "message": result.message,
+        "orders_count": result.orders_count,
+        "order_ids": result.order_ids,
+        "saved_json": result.saved_json,
+        "saved_excel": result.saved_excel,
+        "calendar_changes": result.calendar_changes,
+    }), status
 
 if __name__ == '__main__':
     # Get port from environment (Railway sets this automatically)
