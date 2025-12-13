@@ -17,7 +17,7 @@ const Home = () => {
               console.log(res);
             }}
           >
-            Update Caterings
+            Update Cateringssss
           </Button>
         </Flex>
       </main>
