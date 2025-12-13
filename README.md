@@ -34,7 +34,7 @@ pnpm dev
 > **_NOTE:_** My understanding is that EZCater allows subscriptions to some events. It will emit events (e.g. new orders) to a subscribed webhook URL that is maintained by us.
 0. [One-Time] Set-up a subscription for your webhook URL to the events emitted by the EZCater GraphQL endpoint.
 ```python
-python setup_ezcater_webhooks.py https://your-webhook-url.com/webhook/ezcater
+python setup_ezcater_webhooks.py https://your-webhook-url/webhook/ezcater
 ```
 
 1. Run the webhook server.
@@ -57,3 +57,25 @@ curl -X POST http://127.0.0.1:5000/webhook/ezcater   -H "Content-Type: applicati
 ```bash
 curl http://127.0.0.1:5000/health
 ```
+
+## AWS Notes
+> **_NOTE:_** The lightweight webhook server is currently hosted on an AWS EC2 instance.
+### Connecting to the instance from a terminal
+1. Get the private key `dabao-sg.pem`and `cd` into the directory where the private key is saved.
+2. Run the following commands to connect via SSH:
+```curl
+chmod 400 dabao-sg.pem
+ssh -i "dabao-sg.pem" ubuntu@ec2-18-188-170-191.us-east-2.compute.amazonaws.com
+```
+
+### Starting the webhook server in detached mode
+0. [First Time] Install `screen` then create `screen` session called `dabao-sg`
+```curl
+sudo apt-get install screen
+screen -S dabao-sg
+```
+1. Start existing session called `dabao-sg`:
+```curl
+screen -r dabao-sg
+```
+2. Exit current active session with `Ctrl+A` then `D`. Always do this before exiting the SSH connection to keep the webhook server running.
