@@ -197,7 +197,6 @@ class AmericaToGoScraper:
                 # Wait for grid stability
                 grid = iframe.locator(".dx-datagrid-content").first
                 grid.wait_for(state="visible", timeout=20000)
-                self.page.wait_for_timeout(300)
                 
                 # Get the row
                 row = iframe.locator("tbody tr.dx-data-row").nth(row_index - 1)
@@ -215,10 +214,10 @@ class AmericaToGoScraper:
                 
                 # Click the action in dropdown
                 dropdown = iframe.locator('.dx-overlay-content[role="dialog"][aria-label="Dropdown"]:visible').first
-                dropdown.wait_for(state="visible", timeout=1000)
+                dropdown.wait_for(state="visible", timeout=500)
                 
                 action = dropdown.locator(f".dx-list-item:has-text('{action_text}'):visible").first
-                action.wait_for(state="visible", timeout=1000)
+                action.wait_for(state="visible", timeout=500)
                 
                 try:
                     action.click(timeout=4000)
