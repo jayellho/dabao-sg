@@ -197,13 +197,13 @@ class AmericaToGoScraper:
                 # Wait for grid stability
                 grid = iframe.locator(".dx-datagrid-content").first
                 grid.wait_for(state="visible", timeout=20000)
-                self.page.wait_for_timeout(500)
+                self.page.wait_for_timeout(300)
                 
                 # Get the row
                 row = iframe.locator("tbody tr.dx-data-row").nth(row_index - 1)
                 row.wait_for(state="visible", timeout=15000)
                 row.scroll_into_view_if_needed()
-                self.page.wait_for_timeout(500)
+                self.page.wait_for_timeout(300)
                 
                 # Find and click three-dots button
                 button = row.locator(".dx-dropdownbutton[title='Available actions'] .dx-dropdownbutton-action").first
@@ -211,14 +211,14 @@ class AmericaToGoScraper:
                     raise Exception(f"Could not find three-dots button in row {row_index}")
                 
                 button.click(force=True)
-                self.page.wait_for_timeout(500)
+                self.page.wait_for_timeout(300)
                 
                 # Click the action in dropdown
                 dropdown = iframe.locator('.dx-overlay-content[role="dialog"][aria-label="Dropdown"]:visible').first
-                dropdown.wait_for(state="visible", timeout=8000)
+                dropdown.wait_for(state="visible", timeout=1000)
                 
                 action = dropdown.locator(f".dx-list-item:has-text('{action_text}'):visible").first
-                action.wait_for(state="visible", timeout=5000)
+                action.wait_for(state="visible", timeout=1000)
                 
                 try:
                     action.click(timeout=4000)
