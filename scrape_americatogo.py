@@ -197,7 +197,7 @@ class AmericaToGoScraper:
                 # Wait for grid stability
                 grid = iframe.locator(".dx-datagrid-content").first
                 grid.wait_for(state="visible", timeout=20000)
-                self.page.wait_for_timeout(1000)
+                self.page.wait_for_timeout(500)
                 
                 # Get the row
                 row = iframe.locator("tbody tr.dx-data-row").nth(row_index - 1)
@@ -211,7 +211,7 @@ class AmericaToGoScraper:
                     raise Exception(f"Could not find three-dots button in row {row_index}")
                 
                 button.click(force=True)
-                self.page.wait_for_timeout(1500)
+                self.page.wait_for_timeout(500)
                 
                 # Click the action in dropdown
                 dropdown = iframe.locator('.dx-overlay-content[role="dialog"][aria-label="Dropdown"]:visible').first
@@ -232,10 +232,10 @@ class AmericaToGoScraper:
             except Exception as e:
                 logger.debug(f"✗ Attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries - 1:
-                    self.page.wait_for_timeout(2000)
+                    self.page.wait_for_timeout(500)
                     try:
                         self.page.keyboard.press('Escape')
-                        self.page.wait_for_timeout(1000)
+                        self.page.wait_for_timeout(500)
                     except:
                         pass
         
@@ -261,7 +261,7 @@ class AmericaToGoScraper:
                         close_button = iframe.locator(selector).first
                         if close_button.count() > 0 and close_button.is_visible():
                             close_button.click()
-                            self.page.wait_for_timeout(1000)
+                            self.page.wait_for_timeout(500)
                             popup_closed = True
                             break
                     except:
@@ -272,7 +272,7 @@ class AmericaToGoScraper:
                 
                 # Try Escape key
                 self.page.keyboard.press('Escape')
-                self.page.wait_for_timeout(1000)
+                self.page.wait_for_timeout(500)
                 
                 # Check if popup is gone
                 try:
@@ -545,7 +545,7 @@ class AmericaToGoScraper:
                 return None
             
             # Wait for popup to load
-            self.page.wait_for_timeout(3000)
+            self.page.wait_for_timeout(1000)
             
             # Extract details
             order_details = self.extract_order_details()
@@ -587,7 +587,7 @@ class AmericaToGoScraper:
                     break
                 except:
                     logger.warning(f"Failed to get row count, attempt {attempt + 1}")
-                    self.page.wait_for_timeout(2000)
+                    self.page.wait_for_timeout(1000)
             
             if total_rows is None:
                 logger.warning("Could not determine number of rows, skipping page")
@@ -642,7 +642,7 @@ class AmericaToGoScraper:
             if self.navigate_to_next_page():
                 current_page += 1
                 start_from_row = 1
-                self.page.wait_for_timeout(3000)
+                self.page.wait_for_timeout(1000)
             else:
                 logger.info("No more pages to process")
                 break
